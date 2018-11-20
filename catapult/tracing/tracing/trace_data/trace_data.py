@@ -50,7 +50,6 @@ ATRACE_PROCESS_DUMP_PART = TraceDataPart('atraceProcessDump')
 CHROME_TRACE_PART = TraceDataPart('traceEvents')
 CPU_TRACE_DATA = TraceDataPart('cpuSnapshots')
 INSPECTOR_TRACE_PART = TraceDataPart('inspectorTimelineEvents')
-SURFACE_FLINGER_PART = TraceDataPart('surfaceFlinger')
 TELEMETRY_PART = TraceDataPart('telemetry')
 WALT_TRACE_PART = TraceDataPart('waltTraceEvents')
 
@@ -60,7 +59,6 @@ ALL_TRACE_PARTS = {ANDROID_PROCESS_DATA_PART,
                    CHROME_TRACE_PART,
                    CPU_TRACE_DATA,
                    INSPECTOR_TRACE_PART,
-                   SURFACE_FLINGER_PART,
                    TELEMETRY_PART}
 
 ALL_TRACE_PARTS_RAW_NAMES = set(k.raw_field_name for k in ALL_TRACE_PARTS)
@@ -274,7 +272,7 @@ class TraceDataBuilder(object):
     self._raw_data = {}
 
   def AsData(self):
-    if self._raw_data == None:
+    if self._raw_data is None:
       raise Exception('Can only AsData once')
     data = TraceData()
     data._SetFromBuilder(self._raw_data)
@@ -292,7 +290,7 @@ class TraceDataBuilder(object):
               isinstance(trace, dict) or
               isinstance(trace, list))
 
-    if self._raw_data == None:
+    if self._raw_data is None:
       raise Exception('Already called AsData() on this builder.')
 
     self._raw_data.setdefault(part.raw_field_name, [])

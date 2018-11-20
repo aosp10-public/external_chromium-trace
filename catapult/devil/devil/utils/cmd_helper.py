@@ -152,12 +152,12 @@ def _ValidateAndLogCommand(args, cwd, shell):
   else:
     if shell:
       raise Exception('array args must be run with shell=False')
-    args = ' '.join(SingleQuote(c) for c in args)
+    args = ' '.join(SingleQuote(str(c)) for c in args)
   if cwd is None:
     cwd = ''
   else:
     cwd = ':' + cwd
-  logger.info('[host]%s> %s', cwd, args)
+  logger.debug('[host]%s> %s', cwd, args)
   return args
 
 

@@ -13,6 +13,7 @@ import collections
 import fnmatch
 import json
 import logging
+import math
 import os
 import posixpath
 import pprint
@@ -209,6 +210,7 @@ _SPECIAL_ROOT_DEVICE_LIST = [
     'marlin', # Pixel XL
     'sailfish', # Pixel
     'taimen', # Pixel 2 XL
+    'vega', # Lenovo Mirage Solo
     'walleye', # Pixel 2
 ]
 _IMEI_RE = re.compile(r'  Device ID = (.+)$')
@@ -424,6 +426,20 @@ class DeviceUtils(object):
   @decorators.WithTimeoutAndRetriesFromInstance()
   def HasRoot(self, timeout=None, retries=None):
     """Checks whether or not adbd has root privileges.
+
+    A device is considered to have root if all commands are implicitly run
+    with elevated privileges, i.e. without having to use "su" to run them.
+
+    Note that some devices do not allow this implicit privilige elevation,
+    but _can_ run commands as root just fine when done explicitly with "su".
+    To check if your device can run commands with elevated privileges at all
+    use:
+
+      device.HasRoot() or device.NeedsSU()
+
+    Luckily, for the most part you don't need to worry about this and using
+    RunShellCommand(cmd, as_root=True) will figure out for you the right
+    command incantation to run with elevated privileges.
 
     Args:
       timeout: timeout in seconds
@@ -1004,8 +1020,8 @@ class DeviceUtils(object):
   @decorators.WithTimeoutAndRetriesFromInstance()
   def RunShellCommand(self, cmd, shell=False, check_return=False, cwd=None,
                       env=None, run_as=None, as_root=False, single_line=False,
-                      large_output=False, raw_output=False, timeout=None,
-                      retries=None):
+                      large_output=False, raw_output=False,
+                      ensure_logs_on_timeout=False, timeout=None, retries=None):
     """Run an ADB shell command.
 
     The command to run |cmd| should be a sequence of program arguments
@@ -1048,6 +1064,10 @@ class DeviceUtils(object):
         this large output will be truncated.
       raw_output: Whether to only return the raw output
           (no splitting into lines).
+      ensure_logs_on_timeout: If True, will use a slightly smaller timeout for
+          the internal adb command, which allows to retrive logs on timeout.
+          Note that that logs are not guaranteed to be produced with this option
+          as adb command may still hang and fail to respect the reduced timeout.
       timeout: timeout in seconds
       retries: number of retries
 
@@ -1071,7 +1091,7 @@ class DeviceUtils(object):
       return '%s=%s' % (key, cmd_helper.DoubleQuote(value))
 
     def run(cmd):
-      return self.adb.Shell(cmd)
+      return self.adb.Shell(cmd, ensure_logs_on_timeout=ensure_logs_on_timeout)
 
     def handle_check_return(cmd):
       try:
@@ -2805,7 +2825,7 @@ class DeviceUtils(object):
       return parallelizer.SyncParallelizer(devices)
 
   @classmethod
-  def HealthyDevices(cls, blacklist=None, device_arg='default', retry=True,
+  def HealthyDevices(cls, blacklist=None, device_arg='default', retries=1,
                      abis=None, **kwargs):
     """Returns a list of DeviceUtils instances.
 
@@ -2828,8 +2848,9 @@ class DeviceUtils(object):
               blacklisted.
           ['A', 'B', ...] -> Returns instances for the subset that is not
               blacklisted.
-      retry: If true, will attempt to restart adb server and query it again if
-          no devices are found.
+      retries: Number of times to restart adb server and query it again if no
+          devices are found on the previous attempts, with exponential backoffs
+          up to 60s between each retry.
       abis: A list of ABIs for which the device needs to support at least one of
           (optional).
       A device serial, or a list of device serials (optional).
@@ -2891,15 +2912,20 @@ class DeviceUtils(object):
         raise device_errors.MultipleDevicesError(devices)
       return sorted(devices)
 
-    try:
-      return _get_devices()
-    except device_errors.NoDevicesError:
-      if not retry:
-        raise
-      logger.warning(
-          'No devices found. Will try again after restarting adb server.')
-      RestartServer()
-      return _get_devices()
+    for attempt in xrange(retries+1):
+      try:
+        return _get_devices()
+      except device_errors.NoDevicesError:
+        if attempt == retries:
+          logging.error('No devices found after exhausting all retries.')
+          raise
+        # math.pow returns floats, so cast to int for easier testing
+        sleep_s = min(int(math.pow(2, attempt + 1)), 60)
+        logger.warning(
+            'No devices found. Will try again after restarting adb server '
+            'and a short nap of %d s.', sleep_s)
+        time.sleep(sleep_s)
+        RestartServer()
 
   @decorators.WithTimeoutAndRetriesFromInstance()
   def RestartAdbd(self, timeout=None, retries=None):
